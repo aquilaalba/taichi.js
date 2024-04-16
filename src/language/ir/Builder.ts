@@ -41,6 +41,8 @@ import {
     Stmt,
     TextureFunctionKind,
     TextureFunctionStmt,
+    TrinaryOpStmt,
+    TrinaryOpType,
     UnaryOpStmt,
     UnaryOpType,
     VertexForStmt,
@@ -110,12 +112,16 @@ export class IRBuilder {
         return this.pushNewStmt(new LocalStoreStmt(ptr, val, this.getNewId()));
     }
 
+    create_unary_op(operand: Stmt, op: UnaryOpType) {
+        return this.pushNewStmt(new UnaryOpStmt(operand, op, this.getNewId()));
+    }
+
     create_binary_op(lhs: Stmt, rhs: Stmt, op: BinaryOpType) {
         return this.pushNewStmt(new BinaryOpStmt(lhs, rhs, op, this.getNewId()));
     }
 
-    create_unary_op(operand: Stmt, op: UnaryOpType) {
-        return this.pushNewStmt(new UnaryOpStmt(operand, op, this.getNewId()));
+    create_trinary_op(lhs: Stmt, mhs: Stmt, rhs: Stmt, op: TrinaryOpType) {
+        return this.pushNewStmt(new TrinaryOpStmt(lhs, mhs, rhs, op, this.getNewId()));
     }
 
     create_atomic_op(dest: PointerStmt, val: Stmt, op: AtomicOpType) {

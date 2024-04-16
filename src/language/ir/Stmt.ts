@@ -19,8 +19,9 @@ export enum StmtKind {
     GlobalTemporaryStmt,
     GlobalTemporaryLoadStmt,
     GlobalTemporaryStoreStmt,
-    BinaryOpStmt,
     UnaryOpStmt,
+    BinaryOpStmt,
+    TrinaryOpStmt,
     WhileStmt,
     IfStmt,
     WhileControlStmt,
@@ -253,101 +254,9 @@ export function getPointedType(ptr: PointerStmt) {
     }
 }
 
-export enum BinaryOpType {
-    mul,
-    add,
-    sub,
-    truediv,
-    floordiv,
-    mod,
-    max,
-    min,
-    bit_and,
-    bit_or,
-    bit_xor,
-    bit_shl,
-    bit_shr,
-    bit_sar,
-    cmp_lt,
-    cmp_le,
-    cmp_gt,
-    cmp_ge,
-    cmp_eq,
-    cmp_ne,
-    atan2,
-    pow,
-    logical_or,
-    logical_and,
-}
-
-export function getBinaryOpReturnType(
-    leftType: PrimitiveType,
-    rightType: PrimitiveType,
-    op: BinaryOpType
-): PrimitiveType | undefined {
-    switch (op) {
-        case BinaryOpType.cmp_eq:
-        case BinaryOpType.cmp_ge:
-        case BinaryOpType.cmp_gt:
-        case BinaryOpType.cmp_le:
-        case BinaryOpType.cmp_lt:
-        case BinaryOpType.cmp_ne:
-            return PrimitiveType.i32;
-        case BinaryOpType.logical_and:
-        case BinaryOpType.logical_or:
-        case BinaryOpType.bit_and:
-        case BinaryOpType.bit_or:
-        case BinaryOpType.bit_xor:
-        case BinaryOpType.bit_shl:
-        case BinaryOpType.bit_sar:
-        case BinaryOpType.bit_shr: {
-            if (leftType !== PrimitiveType.i32 || rightType !== PrimitiveType.i32) {
-                return undefined;
-            }
-            return PrimitiveType.i32;
-        }
-        case BinaryOpType.truediv:
-            return PrimitiveType.f32;
-        case BinaryOpType.floordiv:
-            return PrimitiveType.i32;
-        default: {
-            if (leftType == rightType) {
-                return leftType;
-            }
-            return PrimitiveType.f32;
-        }
-    }
-}
-
-export class BinaryOpStmt extends Stmt {
-    constructor(public left: Stmt, public right: Stmt, public op: BinaryOpType, id: number, nameHint: string = '') {
-        assert(
-            left.returnType !== undefined && right.returnType !== undefined,
-            'LHS and RHS of binary op must both have a valid return type',
-            left,
-            right
-        );
-        let returnType = getBinaryOpReturnType(left.getReturnType(), right.getReturnType(), op);
-        super(id, returnType, nameHint);
-        this.operands = [left, right];
-    }
-    override getKind(): StmtKind {
-        return StmtKind.BinaryOpStmt;
-    }
-    getLeft() {
-        return this.operands[0];
-    }
-    getRight() {
-        return this.operands[1];
-    }
-    setLeft(left: Stmt) {
-        this.operands[0] = left;
-    }
-    setRight(right: Stmt) {
-        this.operands[1] = right;
-    }
-}
-
+/**
+ * UnaryOpType
+ */
 export enum UnaryOpType {
     neg,
     sqrt,
@@ -372,7 +281,7 @@ export enum UnaryOpType {
     log,
     rsqrt,
     bit_not,
-    logic_not,
+    logic_not
 }
 
 export function getUnaryOpReturnType(operandType: PrimitiveType, op: UnaryOpType): PrimitiveType | undefined {
@@ -415,6 +324,174 @@ export class UnaryOpStmt extends Stmt {
     }
     getOperand() {
         return this.operands[0];
+    }
+}
+
+/**
+ * BinaryOpType
+ */
+export enum BinaryOpType {
+    mul,
+    add,
+    sub,
+    truediv,
+    floordiv,
+    mod,
+    max,
+    min,
+    bit_and,
+    bit_or,
+    bit_xor,
+    bit_shl,
+    bit_shr,
+    bit_sar,
+    cmp_lt,
+    cmp_le,
+    cmp_gt,
+    cmp_ge,
+    cmp_eq,
+    cmp_ne,
+    atan2,
+    pow,
+    logical_or,
+    logical_and,
+    step
+}
+
+export function getBinaryOpReturnType(
+    leftType: PrimitiveType,
+    rightType: PrimitiveType,
+    op: BinaryOpType
+): PrimitiveType | undefined {
+    switch (op) {
+        case BinaryOpType.cmp_eq:
+        case BinaryOpType.cmp_ge:
+        case BinaryOpType.cmp_gt:
+        case BinaryOpType.cmp_le:
+        case BinaryOpType.cmp_lt:
+        case BinaryOpType.cmp_ne:
+            return PrimitiveType.i32;
+        case BinaryOpType.logical_and:
+        case BinaryOpType.logical_or:
+        case BinaryOpType.bit_and:
+        case BinaryOpType.bit_or:
+        case BinaryOpType.bit_xor:
+        case BinaryOpType.bit_shl:
+        case BinaryOpType.bit_sar:
+        case BinaryOpType.bit_shr: {
+            if (leftType !== PrimitiveType.i32 || rightType !== PrimitiveType.i32) {
+                return undefined;
+            }
+            return PrimitiveType.i32;
+        }
+        case BinaryOpType.truediv:
+            return PrimitiveType.f32;
+        case BinaryOpType.floordiv:
+            return PrimitiveType.i32;
+        case BinaryOpType.step:
+            if (leftType !== PrimitiveType.f32 || rightType !== PrimitiveType.f32) {
+                return undefined;
+            }
+            return PrimitiveType.f32;
+        default: {
+            if (leftType == rightType) {
+                return leftType;
+            }
+            return PrimitiveType.f32;
+        }
+    }
+}
+
+export class BinaryOpStmt extends Stmt {
+    constructor(public left: Stmt, public right: Stmt, public op: BinaryOpType, id: number, nameHint: string = '') {
+        assert(
+            left.returnType !== undefined && right.returnType !== undefined,
+            'LHS and RHS of binary op must both have a valid return type',
+            left,
+            right
+        );
+        let returnType = getBinaryOpReturnType(left.getReturnType(), right.getReturnType(), op);
+        super(id, returnType, nameHint);
+        this.operands = [left, right];
+    }
+    override getKind(): StmtKind {
+        return StmtKind.BinaryOpStmt;
+    }
+    getLeft() {
+        return this.operands[0];
+    }
+    getRight() {
+        return this.operands[1];
+    }
+    setLeft(left: Stmt) {
+        this.operands[0] = left;
+    }
+    setRight(right: Stmt) {
+        this.operands[1] = right;
+    }
+}
+
+/**
+ * TrinaryOpType
+ */
+export enum TrinaryOpType {
+    fma
+}
+
+export function getTrinaryOpReturnType(
+    leftType: PrimitiveType,
+    middleType: PrimitiveType,
+    rightType: PrimitiveType,
+    op: TrinaryOpType
+): PrimitiveType | undefined {
+    switch (op) {
+        case TrinaryOpType.fma:
+            if (leftType !== PrimitiveType.f32 || middleType !== PrimitiveType.f32 || rightType !== PrimitiveType.f32) {
+                return undefined;
+            }
+            return PrimitiveType.f32;
+        default: {
+            if (leftType == rightType) {
+                return leftType;
+            }
+            return PrimitiveType.f32;
+        }
+    }
+}
+
+export class TrinaryOpStmt extends Stmt {
+    constructor(public left: Stmt, public middle: Stmt, public right: Stmt, public op: TrinaryOpType, id: number, nameHint: string = '') {
+        assert(
+            left.returnType !== undefined && middle.returnType !== undefined && right.returnType !== undefined,
+            'LHS, MHS and RHS of trinary op must have a valid return type',
+            left,
+            middle,
+            right
+        );
+        let returnType = getTrinaryOpReturnType(left.getReturnType(), middle.getReturnType(), right.getReturnType(), op);
+        super(id, returnType, nameHint);
+        this.operands = [left, middle, right];
+    }
+    override getKind(): StmtKind {
+        return StmtKind.TrinaryOpStmt;
+    }
+    getLeft() {
+        return this.operands[0];
+    }
+    getMiddle() {
+        return this.operands[1];
+    }
+    getRight() {
+        return this.operands[2];
+    }
+    setLeft(left: Stmt) {
+        this.operands[0] = left;
+    }
+    setMiddle(middle: Stmt) {
+        this.operands[1] = middle;
+    }
+    setRight(right: Stmt) {
+        this.operands[2] = right;
     }
 }
 

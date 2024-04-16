@@ -54,6 +54,8 @@ import {
     StmtKind,
     TextureFunctionKind,
     TextureFunctionStmt,
+    TrinaryOpStmt,
+    TrinaryOpType,
     UnaryOpStmt,
     UnaryOpType,
     VertexForStmt,
@@ -253,6 +255,8 @@ export class CodegenVisitor extends IRVisitor {
                     return `max(${lhs}, ${rhs})`;
                 case BinaryOpType.min:
                     return `min(${lhs}, ${rhs})`;
+                case BinaryOpType.step:
+                    return `step(${lhs}, ${rhs})`;
                 case BinaryOpType.bit_and:
                     return `(${lhs} & ${rhs})`;
                 case BinaryOpType.bit_or:
@@ -301,6 +305,25 @@ export class CodegenVisitor extends IRVisitor {
                         }
                     }
                 }
+            }
+        };
+        let value = getValue();
+        let dtName = this.getPrimitiveTypeName(dt);
+        this.emitLet(stmt.getName(), dtName);
+        this.body.write(`${dtName}(${value});\n`);
+    }
+
+    override visitTrinaryOpStmt(stmt: TrinaryOpStmt): void {
+        let lhs = stmt.getLeft().getName();
+        let mhs = stmt.getMiddle().getName();
+        let rhs = stmt.getRight().getName();
+        let op = stmt.op;
+        let dt = stmt.getReturnType();
+
+        let getValue = () => {
+            switch (op) {
+                case TrinaryOpType.fma: 
+                    return `fma(f32(${lhs}), f32(${mhs}), f32(${rhs}))`;
             }
         };
         let value = getValue();

@@ -44,10 +44,12 @@ class ASTVisitor<T> {
                 return this.visitNumericLiteral(node as ts.NumericLiteral);
             case ts.SyntaxKind.ExpressionStatement:
                 return this.visitExpressionStatement(node as ts.ExpressionStatement);
-            case ts.SyntaxKind.BinaryExpression:
-                return this.visitBinaryExpression(node as ts.BinaryExpression);
             case ts.SyntaxKind.PrefixUnaryExpression:
                 return this.visitPrefixUnaryExpression(node as ts.PrefixUnaryExpression);
+            case ts.SyntaxKind.BinaryExpression:
+                return this.visitBinaryExpression(node as ts.BinaryExpression);
+            case ts.SyntaxKind.TrinaryExpression:
+                return this.visitTrinaryExpression(node as ts.TrinaryExpression);
             case ts.SyntaxKind.CallExpression:
                 return this.visitCallExpression(node as ts.CallExpression);
             case ts.SyntaxKind.PropertyAccessExpression:
@@ -161,11 +163,15 @@ class ASTVisitor<T> {
         return this.visitEachChild(node);
     }
 
+    protected visitPrefixUnaryExpression(node: ts.PrefixUnaryExpression): VisitorResult<T> {
+        return this.visitEachChild(node);
+    }
+
     protected visitBinaryExpression(node: ts.BinaryExpression): VisitorResult<T> {
         return this.visitEachChild(node);
     }
 
-    protected visitPrefixUnaryExpression(node: ts.PrefixUnaryExpression): VisitorResult<T> {
+    protected visitTrinaryExpression(node: ts.TrinaryExpression): VisitorResult<T> {
         return this.visitEachChild(node);
     }
 

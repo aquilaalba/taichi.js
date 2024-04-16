@@ -17,13 +17,15 @@ import {
     AllocaStmt,
     AtomicOpType,
     BinaryOpType,
-    getBinaryOpReturnType,
     getUnaryOpReturnType,
+    getBinaryOpReturnType,
+    getTrinaryOpReturnType,
     GlobalPtrStmt,
     GlobalTemporaryStmt,
     PointerStmt,
     Stmt,
     StmtKind,
+    TrinaryOpType,
     UnaryOpType,
 } from '../ir/Stmt';
 import { IRBuilder } from '../ir/Builder';
@@ -272,6 +274,174 @@ class BuiltinBinaryOp extends BuiltinOp {
     }
 }
 
+class BuiltinTrinaryOp extends BuiltinOp {
+    constructor(
+        name: string,
+        public irBuilder: IRBuilder,
+        public allowBroadcastLeftToRight: boolean,
+        public allowBroadcastRightToLeft: boolean,
+        public op: TrinaryOpType,
+        public fConst: ((left: number, middle: number, right: number) => number) | null = null
+    ) {
+        super(name, 3);
+    }
+
+    override checkType(args: Value[]): TypeError {
+        if (args.length !== 3) {
+            return TypeError.createError('wrong number of arguments');
+        }
+        let type0 = args[0].getType();
+        let type1 = args[1].getType();
+        let type2 = args[2].getType();
+        let cat0 = type0.getCategory();
+        let cat1 = type1.getCategory();
+        let cat2 = type2.getCategory();
+
+        if (!TypeUtils.isTensorType(type0)) {
+            return TypeError.createError('can only be applied to scalar/vector/matrix types');
+        }
+        if (!TypeUtils.isTensorType(type1)) {
+            return TypeError.createError('can only be applied to scalar/vector/matrix types');
+        }
+
+        let prim0 = TypeUtils.getPrimitiveType(type0);
+        let prim1 = TypeUtils.getPrimitiveType(type1);
+        let prim2 = TypeUtils.getPrimitiveType(type2);
+
+        let resultPrim = getTrinaryOpReturnType(prim0, prim1, prim2, this.op);
+        if (!resultPrim) {
+            return TypeError.createError(
+                `trinary op "${this.name}" cannot be applied when LHS primitive type is ${prim0}, MHS primitive type is ${prim1} and RHS primitive type is ${prim2}`
+            );
+        }
+
+        // Todo
+        if (cat0 !== cat1) {
+            if (cat0 === TypeCategory.Scalar && cat1 !== TypeCategory.Scalar) {
+                if (this.allowBroadcastLeftToRight) {
+                    return TypeError.createNoError();
+                } else {
+                    return TypeError.createError('Broadcast (left to right) not allowed');
+                }
+            } else if (cat0 !== TypeCategory.Scalar && cat1 === TypeCategory.Scalar) {
+                if (this.allowBroadcastRightToLeft) {
+                    return TypeError.createNoError();
+                } else {
+                    return TypeError.createError('Broadcast (right to left) not allowed');
+                }
+            }
+            return TypeError.createError('Incompatible types');
+        } else {
+            // cat0 === cat1
+            if (cat0 === TypeCategory.Scalar) {
+                return TypeError.createNoError();
+            } else if (cat0 === TypeCategory.Vector) {
+                let numRows0 = (type0 as VectorType).getNumRows();
+                let numRows1 = (type1 as VectorType).getNumRows();
+                if (numRows0 === numRows1) {
+                    return TypeError.createNoError();
+                } else {
+                    return TypeError.createError(
+                        `numRows mismatch during vector-vector binary op: LHS num rows is ${numRows0}, but RHS num rows is ${numRows1}`
+                    );
+                }
+            } else if (cat0 === TypeCategory.Matrix) {
+                let mat0 = type0 as MatrixType;
+                let mat1 = type1 as MatrixType;
+                if (mat0.getNumRows() === mat0.getNumRows() && mat1.getNumCols() === mat1.getNumCols()) {
+                    return TypeError.createNoError();
+                } else {
+                    return TypeError.createError(
+                        `matrix shape mismatch during matrix-matrix binary op: LHS is a ${mat0.getNumRows()} by ${mat0.getNumRows()} matrix, but RHS is a ${mat1.getNumRows()} by ${mat1.getNumRows()} matrix.`
+                    );
+                }
+            }
+            error('[Compiler Bug]', 'cat0 is not tensor type');
+            return TypeError.createError('[Compiler Bug] cat0 is not tensor type');
+        }
+    }
+
+    private getResultType(type0: Type, type1: Type, type2: Type) {
+        // assuming checkType
+        let cat0 = type0.getCategory();
+        let cat1 = type1.getCategory();
+        let cat2 = type2.getCategory();
+        let prim0 = TypeUtils.getPrimitiveType(type0);
+        let prim1 = TypeUtils.getPrimitiveType(type1);
+        let prim2 = TypeUtils.getPrimitiveType(type2);
+        let resultPrim = getTrinaryOpReturnType(prim0, prim1, prim2, this.op);
+        if (resultPrim === undefined) {
+            error('[Compiler Bug]', 'unsupported primitives in trinary op');
+        }
+
+        // Todo
+        if (cat0 !== cat1) {
+            if (cat0 === TypeCategory.Scalar && cat1 !== TypeCategory.Scalar && this.allowBroadcastLeftToRight) {
+                return TypeUtils.replacePrimitiveType(type1, resultPrim!);
+            } else if (cat0 !== TypeCategory.Scalar && cat1 === TypeCategory.Scalar && this.allowBroadcastRightToLeft) {
+                return TypeUtils.replacePrimitiveType(type0, resultPrim!);
+            }
+            error('[Compiler Bug]', 'bad broadcase');
+            return type0;
+        } else {
+            // cat0 === cat1
+            return TypeUtils.replacePrimitiveType(type0, resultPrim!);
+        }
+    }
+
+    apply(args: Value[]): Value {
+        let typeError = this.checkType(args);
+        assert(!typeError.hasError, '[Compiler Bug]', 'trinary op type check failed', typeError.msg);
+        let type0 = args[0].getType();
+        let type1 = args[1].getType();
+        let type2 = args[2].getType();
+        let cat0 = type0.getCategory();
+        let cat1 = type1.getCategory();
+        let cat2 = type2.getCategory();
+
+        let resultType = this.getResultType(type0, type1, type2);
+        let result = new Value(resultType, [], []);
+
+        // TODO
+        let shouldEvaluateConstexpr =
+            args[0].isCompileTimeConstant() && args[1].isCompileTimeConstant() && args[2].isCompileTimeConstant() && this.fConst !== null;
+
+        if (cat0 !== cat1) {
+            if (cat0 === TypeCategory.Scalar && cat1 !== TypeCategory.Scalar && this.allowBroadcastLeftToRight) {
+                for (let i = 0; i < args[1].stmts.length; ++i) {
+                    result.stmts.push(this.irBuilder.create_trinary_op(args[0].stmts[0], args[0].stmts[0], args[1].stmts[i], this.op));
+                    if (shouldEvaluateConstexpr) {
+                        result.compileTimeConstants.push(
+                            this.fConst!(args[0].compileTimeConstants[0], args[0].compileTimeConstants[0], args[1].compileTimeConstants[i])
+                        );
+                    }
+                }
+            } else if (cat0 !== TypeCategory.Scalar && cat1 === TypeCategory.Scalar && this.allowBroadcastRightToLeft) {
+                for (let i = 0; i < args[0].stmts.length; ++i) {
+                    result.stmts.push(this.irBuilder.create_trinary_op(args[0].stmts[i], args[0].stmts[i], args[1].stmts[0], this.op));
+                    if (shouldEvaluateConstexpr) {
+                        result.compileTimeConstants.push(
+                            this.fConst!(args[0].compileTimeConstants[i], args[0].compileTimeConstants[i], args[1].compileTimeConstants[0])
+                        );
+                    }
+                }
+            }
+        } else {
+            // cat0 === cat1
+            for (let i = 0; i < args[0].stmts.length; ++i) {
+                result.stmts.push(this.irBuilder.create_trinary_op(args[0].stmts[i], args[1].stmts[i], args[2].stmts[i], this.op));
+                if (shouldEvaluateConstexpr) {
+                    result.compileTimeConstants.push(
+                        this.fConst!(args[0].compileTimeConstants[i], args[1].compileTimeConstants[i], args[2].compileTimeConstants[i])
+                    );
+                }
+            }
+        }
+
+        return result;
+    }
+}
+
 class BuiltinCustomOp extends BuiltinOp {
     constructor(name: string, arity: number, checkType: (args: Value[]) => TypeError, apply: (args: Value[]) => Value) {
         super(name, arity);
@@ -377,40 +547,6 @@ class BuiltinOpFactory {
     static getBuiltinOps(irBuilder: IRBuilder): Map<string, BuiltinOp> {
         let opsMap = new Map<string, BuiltinOp>();
         let ops: BuiltinOp[] = [
-            new BuiltinBinaryOp('+', irBuilder, true, true, BinaryOpType.add, (l, r) => l + r),
-            new BuiltinBinaryOp('add', irBuilder, true, true, BinaryOpType.add, (l, r) => l + r),
-            new BuiltinBinaryOp('-', irBuilder, true, true, BinaryOpType.sub, (l, r) => l - r),
-            new BuiltinBinaryOp('sub', irBuilder, true, true, BinaryOpType.sub, (l, r) => l - r),
-            new BuiltinBinaryOp('*', irBuilder, true, true, BinaryOpType.mul, (l, r) => l - r),
-            new BuiltinBinaryOp('mul', irBuilder, true, true, BinaryOpType.sub, (l, r) => l - r),
-            new BuiltinBinaryOp('**', irBuilder, true, true, BinaryOpType.pow, (l, r) => Math.pow(l, r)),
-            new BuiltinBinaryOp('%', irBuilder, true, true, BinaryOpType.mod, (l, r) => l % r),
-            new BuiltinBinaryOp('<', irBuilder, true, true, BinaryOpType.cmp_lt, (l, r) => Number(l < r)),
-            new BuiltinBinaryOp('<=', irBuilder, true, true, BinaryOpType.cmp_le, (l, r) => Number(l <= r)),
-            new BuiltinBinaryOp('>', irBuilder, true, true, BinaryOpType.cmp_gt, (l, r) => Number(l > r)),
-            new BuiltinBinaryOp('>=', irBuilder, true, true, BinaryOpType.cmp_ge, (l, r) => Number(l >= r)),
-            new BuiltinBinaryOp('==', irBuilder, true, true, BinaryOpType.cmp_eq, (l, r) => Number(l === r)),
-            new BuiltinBinaryOp('!=', irBuilder, true, true, BinaryOpType.cmp_ne, (l, r) => Number(l !== r)),
-            new BuiltinBinaryOp('===', irBuilder, true, true, BinaryOpType.cmp_eq, (l, r) => Number(l === r)),
-            new BuiltinBinaryOp('!==', irBuilder, true, true, BinaryOpType.cmp_ne, (l, r) => Number(l !== r)),
-            new BuiltinBinaryOp('&', irBuilder, true, true, BinaryOpType.bit_and, (l, r) => l & r),
-            new BuiltinBinaryOp('&&', irBuilder, false, false, BinaryOpType.bit_and, (l, r) => l & r),
-            new BuiltinBinaryOp('|', irBuilder, true, true, BinaryOpType.bit_or, (l, r) => l & r),
-            new BuiltinBinaryOp('||', irBuilder, false, false, BinaryOpType.bit_or, (l, r) => l & r),
-            new BuiltinBinaryOp('^', irBuilder, true, true, BinaryOpType.bit_xor, (l, r) => l & r),
-
-            new BuiltinBinaryOp('/', irBuilder, true, true, BinaryOpType.truediv, (l, r) => l / r),
-            new BuiltinBinaryOp('div', irBuilder, true, true, BinaryOpType.truediv, (l, r) => l / r),
-
-            // doesn't work
-            new BuiltinBinaryOp('<<', irBuilder, false, false, BinaryOpType.bit_shl),
-            new BuiltinBinaryOp('>>>', irBuilder, false, false, BinaryOpType.bit_shr),
-
-            new BuiltinBinaryOp('max', irBuilder, true, true, BinaryOpType.max, (l, r) => Math.max(l, r)),
-            new BuiltinBinaryOp('min', irBuilder, true, true, BinaryOpType.min, (l, r) => Math.min(l, r)),
-            new BuiltinBinaryOp('pow', irBuilder, true, true, BinaryOpType.pow, (l, r) => Math.pow(l, r)),
-            new BuiltinBinaryOp('atan2', irBuilder, true, true, BinaryOpType.atan2, (l, r) => Math.atan2(l, r)),
-
             new BuiltinUnaryOp('sin', irBuilder, UnaryOpType.sin),
             new BuiltinUnaryOp('cos', irBuilder, UnaryOpType.cos),
             new BuiltinUnaryOp('asin', irBuilder, UnaryOpType.asin),
@@ -432,6 +568,45 @@ class BuiltinOpFactory {
             new BuiltinUnaryOp('f32', irBuilder, UnaryOpType.cast_f32_value, (x) => x),
             new BuiltinUnaryOp('bitcast_f32', irBuilder, UnaryOpType.cast_f32_bits, (x) => x),
             new BuiltinUnaryOp('bitcast_i32', irBuilder, UnaryOpType.cast_i32_bits, (x) => x),
+
+            new BuiltinBinaryOp('+', irBuilder, true, true, BinaryOpType.add, (l, r) => l + r),
+            new BuiltinBinaryOp('add', irBuilder, true, true, BinaryOpType.add, (l, r) => l + r),
+            new BuiltinBinaryOp('-', irBuilder, true, true, BinaryOpType.sub, (l, r) => l - r),
+            new BuiltinBinaryOp('sub', irBuilder, true, true, BinaryOpType.sub, (l, r) => l - r),
+            new BuiltinBinaryOp('*', irBuilder, true, true, BinaryOpType.mul, (l, r) => l * r),
+            new BuiltinBinaryOp('mul', irBuilder, true, true, BinaryOpType.mul, (l, r) => l * r),
+            new BuiltinBinaryOp('**', irBuilder, true, true, BinaryOpType.pow, (l, r) => Math.pow(l, r)),
+            new BuiltinBinaryOp('%', irBuilder, true, true, BinaryOpType.mod, (l, r) => l % r),
+            new BuiltinBinaryOp('mod', irBuilder, true, true, BinaryOpType.mod, (l, r) => l % r),
+            new BuiltinBinaryOp('<', irBuilder, true, true, BinaryOpType.cmp_lt, (l, r) => Number(l < r)),
+            new BuiltinBinaryOp('<=', irBuilder, true, true, BinaryOpType.cmp_le, (l, r) => Number(l <= r)),
+            new BuiltinBinaryOp('>', irBuilder, true, true, BinaryOpType.cmp_gt, (l, r) => Number(l > r)),
+            new BuiltinBinaryOp('>=', irBuilder, true, true, BinaryOpType.cmp_ge, (l, r) => Number(l >= r)),
+            new BuiltinBinaryOp('==', irBuilder, true, true, BinaryOpType.cmp_eq, (l, r) => Number(l === r)),
+            new BuiltinBinaryOp('!=', irBuilder, true, true, BinaryOpType.cmp_ne, (l, r) => Number(l !== r)),
+            new BuiltinBinaryOp('===', irBuilder, true, true, BinaryOpType.cmp_eq, (l, r) => Number(l === r)),
+            new BuiltinBinaryOp('!==', irBuilder, true, true, BinaryOpType.cmp_ne, (l, r) => Number(l !== r)),
+            new BuiltinBinaryOp('&', irBuilder, true, true, BinaryOpType.bit_and, (l, r) => l & r),
+            new BuiltinBinaryOp('&&', irBuilder, false, false, BinaryOpType.bit_and, (l, r) => l & r),
+            new BuiltinBinaryOp('|', irBuilder, true, true, BinaryOpType.bit_or, (l, r) => l & r),
+            new BuiltinBinaryOp('||', irBuilder, false, false, BinaryOpType.bit_or, (l, r) => l & r),
+            new BuiltinBinaryOp('^', irBuilder, true, true, BinaryOpType.bit_xor, (l, r) => l & r),
+
+            new BuiltinBinaryOp('/', irBuilder, true, true, BinaryOpType.truediv, (l, r) => l / r),
+            new BuiltinBinaryOp('div', irBuilder, true, true, BinaryOpType.truediv, (l, r) => l / r),
+            new BuiltinBinaryOp('floordiv', irBuilder, true, true, BinaryOpType.floordiv),
+
+            // doesn't work
+            new BuiltinBinaryOp('<<', irBuilder, false, false, BinaryOpType.bit_shl),
+            new BuiltinBinaryOp('>>', irBuilder, false, false, BinaryOpType.bit_shr),
+
+            new BuiltinBinaryOp('max', irBuilder, true, true, BinaryOpType.max, (l, r) => Math.max(l, r)),
+            new BuiltinBinaryOp('min', irBuilder, true, true, BinaryOpType.min, (l, r) => Math.min(l, r)),
+            new BuiltinBinaryOp('pow', irBuilder, true, true, BinaryOpType.pow, (l, r) => Math.pow(l, r)),
+            new BuiltinBinaryOp('atan2', irBuilder, true, true, BinaryOpType.atan2, (l, r) => Math.atan2(l, r)),
+            new BuiltinBinaryOp('step', irBuilder, true, true, BinaryOpType.step),
+
+            new BuiltinTrinaryOp('fma', irBuilder, true, true, TrinaryOpType.fma),
 
             new BuiltinNullaryOp(
                 'random',
@@ -1152,8 +1327,9 @@ class BuiltinOpFactory {
 export {
     BuiltinOp,
     BuiltinNullaryOp,
-    BuiltinBinaryOp,
     BuiltinUnaryOp,
+    BuiltinBinaryOp,
+    BuiltinTrinaryOp,
     BuiltinAtomicOp,
     BuiltinCustomOp,
     BuiltinOpFactory,

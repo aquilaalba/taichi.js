@@ -33,6 +33,7 @@ import {
     Stmt,
     StmtKind,
     TextureFunctionStmt,
+    TrinaryOpStmt,
     UnaryOpStmt,
     VertexForStmt,
     VertexInputStmt,
@@ -88,11 +89,14 @@ export abstract class IRVisitor {
             case StmtKind.GlobalTemporaryStoreStmt:
                 this.visitGlobalTemporaryStoreStmt(stmt as GlobalTemporaryStoreStmt);
                 break;
+            case StmtKind.UnaryOpStmt:
+                this.visitUnaryOpStmt(stmt as UnaryOpStmt);
+                break;
             case StmtKind.BinaryOpStmt:
                 this.visitBinaryOpStmt(stmt as BinaryOpStmt);
                 break;
-            case StmtKind.UnaryOpStmt:
-                this.visitUnaryOpStmt(stmt as UnaryOpStmt);
+            case StmtKind.TrinaryOpStmt:
+                this.visitTrinaryOpStmt(stmt as TrinaryOpStmt);
                 break;
             case StmtKind.WhileStmt:
                 this.visitWhileStmt(stmt as WhileStmt);
@@ -175,8 +179,9 @@ export abstract class IRVisitor {
     visitGlobalTemporaryStmt(stmt: GlobalTemporaryStmt) {}
     visitGlobalTemporaryLoadStmt(stmt: GlobalTemporaryLoadStmt) {}
     visitGlobalTemporaryStoreStmt(stmt: GlobalTemporaryStoreStmt) {}
-    visitBinaryOpStmt(stmt: BinaryOpStmt) {}
     visitUnaryOpStmt(stmt: UnaryOpStmt) {}
+    visitBinaryOpStmt(stmt: BinaryOpStmt) {}
+    visitTrinaryOpStmt(stmt: TrinaryOpStmt) {}
     visitWhileStmt(stmt: WhileStmt) {
         this.visitBlock(stmt.body);
     }
