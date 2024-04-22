@@ -66,6 +66,7 @@ import {
 } from '../ir/Stmt';
 import { IRVisitor } from '../ir/Visitor';
 import { ComputeModule, OffloadedModule, OffloadType } from './Offload';
+import { declutter } from '../declutterer/WgslDeclutterer';
 
 class ResourceBindingMap {
     bindings: ResourceBinding[] = [];
@@ -95,6 +96,9 @@ class ResourceBindingMap {
 }
 
 export class CodegenVisitor extends IRVisitor {
+
+    private static customWgsl: string | undefined;
+
     constructor(
         public runtime: Runtime,
         public offload: OffloadedModule,
@@ -908,43 +912,56 @@ export class CodegenVisitor extends IRVisitor {
         return new TaskParams(this.assembleShader(), 1, 1, this.resourceBindings.bindings);
     }
 
+    public static setCustomWgsl(customWgsl: string) {
+        this.customWgsl = customWgsl;
+    }
+
     generateRangeForKernel() {
         let blockSize = 128;
         let numWorkgroups = 512;
 
-        let offload = this.offload as ComputeModule;
-        let endExpr = '';
-        if (offload.hasConstRange) {
-            endExpr = `${offload.rangeArg}`;
-            numWorkgroups = divUp(offload.rangeArg, blockSize);
+        if (CodegenVisitor.customWgsl !== undefined) {
+            this.body.write(CodegenVisitor.customWgsl);
         } else {
-            let resource = new ResourceInfo(ResourceType.GlobalTmps);
-            let buffer = this.getBufferMemberName(resource);
-            endExpr = `${buffer}[${offload.rangeArg}]`;
+            let offload = this.offload as ComputeModule;
+            let endExpr = '';
+            if (offload.hasConstRange) {
+                endExpr = `${offload.rangeArg}`;
+                numWorkgroups = divUp(offload.rangeArg, blockSize);
+            } else {
+                let resource = new ResourceInfo(ResourceType.GlobalTmps);
+                let buffer = this.getBufferMemberName(resource);
+                endExpr = `${buffer}[${offload.rangeArg}]`;
+            }
+
+            this.startComputeFunction(blockSize);
+
+            let end = this.getTemp('end');
+            this.emitLet(end, 'i32');
+            this.body.write(`${endExpr};\n`);
+
+            let totalInvocs = this.getTemp('total_invocs');
+            this.emitLet(totalInvocs, 'i32');
+            this.body.write(`${blockSize} * i32(n_workgroups.x);\n`);
+
+            this.emitVar('ii', 'i32');
+            this.body.write('i32(gid3.x);\n');
+
+            this.body.write(this.getIndentation(), 'loop {\n');
+            this.indent();
+
+            this.body.write(this.getIndentation(), `if(ii >= ${end}) { break; }\n`);
+            this.visitBlock(this.offload.block);
+            this.body.write(this.getIndentation(), `continuing { ii = ii + ${totalInvocs}; }\n`);
+
+            this.dedent();
+            this.body.write(this.getIndentation(), '}\n');
+
+            const declutteredWgsl: string = declutter(this.body.getString());
+            this.body = new StringBuilder();
+            this.body.write(declutteredWgsl);
         }
 
-        this.startComputeFunction(blockSize);
-
-        let end = this.getTemp('end');
-        this.emitLet(end, 'i32');
-        this.body.write(`${endExpr};\n`);
-
-        let totalInvocs = this.getTemp('total_invocs');
-        this.emitLet(totalInvocs, 'i32');
-        this.body.write(`${blockSize} * i32(n_workgroups.x);\n`);
-
-        this.emitVar('ii', 'i32');
-        this.body.write('i32(gid3.x);\n');
-
-        this.body.write(this.getIndentation(), 'loop {\n');
-        this.indent();
-
-        this.body.write(this.getIndentation(), `if(ii >= ${end}) { break; }\n`);
-        this.visitBlock(this.offload.block);
-        this.body.write(this.getIndentation(), `continuing { ii = ii + ${totalInvocs}; }\n`);
-
-        this.dedent();
-        this.body.write(this.getIndentation(), '}\n');
         return new TaskParams(this.assembleShader(), blockSize, numWorkgroups, this.resourceBindings.bindings);
     }
 
